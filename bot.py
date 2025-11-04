@@ -8,6 +8,7 @@ from flask import Flask
 import threading
 import logging
 import time
+import json
 
 # Configuration des logs
 logging.basicConfig(level=logging.INFO)
@@ -48,13 +49,18 @@ def send_html_to_mistral(html_content):
             "Content-Type": "application/json"
         }
 
+        # Tronquer le contenu HTML pour éviter les erreurs de taille
+        max_length = 10000  # Limite arbitraire pour éviter les erreurs
+        if len(html_content) > max_length:
+            html_content = html_content[:max_length] + "\n\n[Contenu tronqué pour respecter la limite de taille]"
+
         data = {
             "model": "mistral-small",
             "messages": [
                 {
                     "role": "user",
                     "content": f"""
-                    Voici le contenu complet d'un fichier de diagnostic PC au format HTML :
+                    Voici un extrait du contenu d'un fichier de diagnostic PC au format HTML :
 
                     ```html
                     {html_content}
@@ -62,31 +68,35 @@ def send_html_to_mistral(html_content):
 
                     **Instructions pour l'analyse :**
 
-                    1. Analyse ce fichier HTML pour extraire les informations suivantes :
-                       - Type et fréquence de la RAM (vérifie chaque slot de RAM).
+                    1. Analyse ce contenu pour extraire les informations suivantes :
+                       - Type et fréquence actuelle de la RAM (vérifie chaque slot de RAM).
                        - Modèle de la carte mère.
                        - Modèle du CPU (AMD ou Intel, et si c'est un modèle K, KF, KS pour Intel).
                        - Modèle du GPU (NVIDIA, AMD, Intel).
                        - Si c'est un PC portable.
 
-                    2. Applique les règles suivantes pour déterminer les possibilités d'overclocking :
+                    2. Recherche sur Internet la capacité maximale de fréquence de RAM acceptée par la carte mère.
+
+                    3. Applique les règles suivantes pour déterminer les possibilités d'overclocking :
 
                        **Overclock CPU :**
                        - AMD Ryzen : Possible uniquement si la carte mère est de modèle B ou X.
                        - Intel : Possible uniquement si le CPU est un modèle K, KF ou KS et si la carte mère est de modèle Z.
 
                        **Overclock RAM :**
-                       - AMD Ryzen : Possible uniquement si la carte mère est de modèle B ou X.
-                       - Intel : Possible uniquement si la carte mère est de modèle Z, B560, B660 ou B760.
+                       - Possible uniquement si la fréquence actuelle de la RAM est inférieure à la fréquence maximale supportée par la carte mère.
+                       - Pour les CPU AMD : La carte mère doit être de modèle B ou X.
+                       - Pour les CPU Intel : La carte mère doit être de modèle Z, B560, B660 ou B760.
                        - Vérifie aussi que les slots RAM ne sont pas vides.
+                       - Ne tiens pas compte de l'état de l'XMP.
 
-                       **Overclock GPU :**
+                       **Overclock du GPU :**
                        - Possible uniquement si le GPU est une carte NVIDIA ou AMD.
                        - Pas possible si le GPU est une carte Intel (Intel UHD, Intel Iris).
 
                        **Pas d'overclocking pour les PC portables.**
 
-                    3. Utilise les prix suivants pour les prestations :
+                    4. Utilise les prix suivants pour les prestations :
                         - DDR4 :
                             - Overclock GPU : 30€
                             - Overclock CPU + RAM : 65€
@@ -100,7 +110,7 @@ def send_html_to_mistral(html_content):
                             - Overclock RAM + GPU : 135€
                             - Overclock CPU + RAM + GPU : 195€
 
-                    4. Retourne une réponse sous la forme suivante :
+                    5. Retourne une réponse sous la forme suivante :
 
                     ```
                     Tu peux faire :
@@ -117,6 +127,7 @@ def send_html_to_mistral(html_content):
                 }
             ]
         }
+
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
 
@@ -129,6 +140,7 @@ def send_html_to_mistral(html_content):
             return send_html_to_mistral(html_content)  # Réessayer après le délai
         else:
             logger.error(f"Erreur HTTP lors de l'appel à l'API Mistral : {e}")
+            logger.error(f"Réponse de l'API : {e.response.text}")
             return f"Erreur HTTP : {e}"
     except Exception as e:
         logger.error(f"Erreur lors de l'appel à l'API Mistral : {e}")
