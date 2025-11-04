@@ -96,7 +96,7 @@ def extract_info_from_html(html_bytes):
             info["CPU"] = cpu_line.strip()
 
     # Extraire le GPU
-    gpu_keywords = ["NVIDIA", "AMD RADEON", "GTX", "RTX", "Intel UHD", "Intel Iris"]
+    gpu_keywords = ["NVIDIA", "AMD", "RADEON", "GTX", "RTX"]
     for keyword in gpu_keywords:
         if keyword in text:
             gpu_start = text.find(keyword)
@@ -138,9 +138,8 @@ def determine_overclocking(info):
 
     # Règles pour l'overclocking du GPU
     if gpu:
-        if "NVIDIA" in gpu or "AMD RADEON" in gpu or "RTX" in gpu or "GTX" in gpu:
-            if not ("Intel UHD" in gpu or "Intel Iris" in gpu):
-                overclockable.append("GPU")
+        if ("NVIDIA" in gpu or "AMD" in gpu or "RADEON" in gpu or "RTX" in gpu or "GTX" in gpu) and not ("Intel UHD" in gpu or "Intel Iris" in gpu):
+            overclockable.append("GPU")
 
     # Déterminer la prestation et le prix
     prestation = ""
