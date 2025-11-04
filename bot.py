@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 # Charger les variables d'environnement
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 # Vérification des variables d'environnement
-if not all([DISCORD_TOKEN, CHANNEL_ID]):
+if not all([DISCORD_TOKEN, MISTRAL_API_KEY, CHANNEL_ID]):
     logger.error("Variables d'environnement manquantes !")
     raise ValueError("Variables d'environnement manquantes !")
 
@@ -107,64 +108,95 @@ def extract_info_from_html(html_bytes):
 
     return info
 
-# Fonction pour déterminer les possibilités d'overclocking
-def determine_overclocking(info):
-    if info["is_laptop"]:
-        return [], "Pas de prestation pour PC portable", 0
+# Fonction pour envoyer les informations à Mistral
+def send_to_mistral(info):
+    try:
+        url = "https://api.mistral.ai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {MISTRAL_API_KEY}",
+            "Content-Type": "application/json"
+        }
 
-    cpu = info["CPU"]
-    carte_mere = info["carte_mere"]
-    ram_type = info["RAM"]
-    gpu = info["GPU"]
+        # Vérifier si c'est un PC portable
+        if info["is_laptop"]:
+            return "Pas de prestation d'overclocking disponible pour les PC portables."
 
-    overclockable = []
+        data = {
+            "model": "mistral-small",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"""
+                    Voici les informations d'un diagnostic PC :
+                    - RAM: {info["RAM"]}
+                    - Carte mère: {info["carte_mere"]}
+                    - CPU: {info["CPU"]}
+                    - GPU: {info["GPU"]}
 
-    # Règles pour l'overclocking du CPU
-    if "AMD Ryzen" in cpu:
-        if carte_mere and ("B" in carte_mere or "X" in carte_mere):
-            overclockable.append("CPU")
-    elif "Intel" in cpu:
-        if "K" in cpu or "KF" in cpu or "KS" in cpu:
-            if carte_mere and ("Z" in carte_mere):
-                overclockable.append("CPU")
+                    **Règles strictes pour l'overclocking :**
 
-    # Règles pour l'overclocking de la RAM
-    if "AMD Ryzen" in cpu:
-        if carte_mere and ("B" in carte_mere or "X" in carte_mere):
-            overclockable.append("RAM")
-    elif "Intel" in cpu:
-        if carte_mere and ("Z" in carte_mere or carte_mere in ["B560", "B660", "B760"]):
-            overclockable.append("RAM")
+                    1. Overclock CPU AMD :
+                       - Possible uniquement si c'est un AMD Ryzen ET si la carte mère est de modèle B ou X.
 
-    # Règles pour l'overclocking du GPU
-    if gpu:
-        if ("NVIDIA" in gpu or "AMD" in gpu or "RADEON" in gpu or "RTX" in gpu or "GTX" in gpu) and not ("Intel UHD" in gpu or "Intel Iris" in gpu):
-            overclockable.append("GPU")
+                    2. Overclock CPU Intel :
+                       - Possible uniquement si c'est un processeur modèle K, KF ou KS ET si la carte mère est de modèle Z.
 
-    # Déterminer la prestation et le prix
-    prestation = ""
-    prix = 0
+                    3. Overclock de la RAM sur CPU Intel :
+                       - Possible uniquement si la carte mère est de modèle Z, B560, B660 ou B760.
 
-    if len(overclockable) == 0:
-        prestation = "Aucune prestation d'overclocking disponible"
-        prix = 0
-    elif len(overclockable) == 1 and "GPU" in overclockable:
-        prestation = "Overclock GPU"
-        prix = PRESTATIONS[ram_type][prestation]
-    elif len(overclockable) == 2 and "CPU" in overclockable and "RAM" in overclockable:
-        prestation = "Overclock CPU + RAM"
-        prix = PRESTATIONS[ram_type][prestation]
-    elif len(overclockable) == 2 and "CPU" in overclockable and "GPU" in overclockable:
-        prestation = "Overclock CPU + GPU"
-        prix = PRESTATIONS[ram_type][prestation]
-    elif len(overclockable) == 2 and "RAM" in overclockable and "GPU" in overclockable:
-        prestation = "Overclock RAM + GPU"
-        prix = PRESTATIONS[ram_type][prestation]
-    elif len(overclockable) == 3:
-        prestation = "Overclock CPU + RAM + GPU"
-        prix = PRESTATIONS[ram_type][prestation]
+                    4. Overclock de la RAM sur CPU AMD :
+                       - Possible uniquement si c'est un AMD Ryzen ET si la carte mère est de modèle B ou X.
 
-    return overclockable, prestation, prix
+                    5. Overclock du GPU :
+                       - Possible uniquement si c'est une carte graphique NVIDIA ou AMD.
+                       - Pas possible si c'est une carte graphique Intel (Intel UHD, Intel Iris).
+
+                    **Instructions :**
+                    - Détermine quels composants peuvent être overclockés en fonction des règles ci-dessus.
+                    - Utilise les prix suivants pour les prestations :
+                        - DDR4 :
+                            - Overclock GPU : 30€
+                            - Overclock CPU + RAM : 65€
+                            - Overclock CPU + GPU : 75€
+                            - Overclock RAM + GPU : 55€
+                            - Overclock CPU + RAM + GPU : 85€
+                        - DDR5 :
+                            - Overclock GPU : 135€
+                            - Overclock CPU + RAM : 155€
+                            - Overclock CPU + GPU : 175€
+                            - Overclock RAM + GPU : 135€
+                            - Overclock CPU + RAM + GPU : 195€
+
+                    **Format de réponse strict :**
+                    ```
+                    Tu peux faire :
+                    [Liste des composants overclockables parmi CPU, RAM, GPU]
+
+                    Ce qui correspond à la prestation : [Nom de la prestation] à **€[prix]**
+                    ```
+                    - Ne mentionne que les composants qui peuvent être overclockés.
+                    - Respecte strictement le format de réponse.
+                    - Pour les prestations DDR5, ajoute "(Paiement en plusieurs fois possible)" à la fin de la ligne de prix.
+                    """
+                }
+            ]
+        }
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+
+        return response.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            retry_after = int(e.response.headers.get('Retry-After', 10))
+            logger.error(f"Trop de requêtes. Attente de {retry_after} secondes...")
+            time.sleep(retry_after)
+            return send_to_mistral(info)  # Réessayer après le délai
+        else:
+            logger.error(f"Erreur HTTP lors de l'appel à l'API Mistral : {e}")
+            return f"Erreur HTTP : {e}"
+    except Exception as e:
+        logger.error(f"Erreur lors de l'appel à l'API Mistral : {e}")
+        return f"Erreur : {e}"
 
 # Événement : Message reçu
 @bot.event
@@ -181,22 +213,8 @@ async def on_message(message):
                 try:
                     info = extract_info_from_html(file_content)
                     if info["RAM"] and info["carte_mere"] and info["CPU"]:
-                        overclockable, prestation, prix = determine_overclocking(info)
-
-                        # Générer la réponse
-                        if prestation == "Aucune prestation d'overclocking disponible":
-                            response = prestation
-                        else:
-                            response = f"Tu peux faire :\n"
-                            for component in overclockable:
-                                response += f"- Un Overclock {component}\n"
-
-                            if prestation:
-                                response += f"\nCe qui correspond à la prestation : {prestation} à **{prix}€**"
-                                if info["RAM"] == "DDR5":
-                                    response += " (Paiement en plusieurs fois possible)"
-
-                        await message.channel.send(f"```{response}```")
+                        result = send_to_mistral(info)
+                        await message.channel.send(f"```{result}```")
                     else:
                         await message.channel.send("Impossible d'extraire les informations nécessaires du fichier.")
                 except Exception as e:
