@@ -21,7 +21,7 @@ MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 # Vérification des variables d'environnement
-if not DISCORD_TOKEN or not MISTRAL_API_KEY or not CHANNEL_ID:
+if not all([DISCORD_TOKEN, MISTRAL_API_KEY, CHANNEL_ID]):
     raise ValueError("Les variables d'environnement DISCORD_TOKEN, MISTRAL_API_KEY et CHANNEL_ID sont requises.")
 
 if not CHANNEL_ID.isdigit():
@@ -62,13 +62,13 @@ def extract_text_from_html(html_bytes):
 # Fonction pour envoyer le texte à Mistral
 def send_to_mistral(text):
     try:
-        url = "https://api.mistral.ai/v1/models/mistral-tiny/chat"
+        url = "https://api.mistral.ai/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {MISTRAL_API_KEY}",
             "Content-Type": "application/json"
         }
         data = {
-            "model": "mistral-tiny",
+            "model": "mistral-small",
             "messages": [
                 {
                     "role": "user",
@@ -86,7 +86,7 @@ def send_to_mistral(text):
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"Erreur lors de l'appel à l'API Mistral : {e}")
-        return f"Erreur lors de l'analyse : {e}"
+        return f"Erreur : {e}"
 
 # Événement : Bot prêt
 @bot.event
@@ -117,7 +117,7 @@ async def on_message(message):
                         await message.channel.send("Impossible d'extraire le texte du fichier.")
                 except Exception as e:
                     logger.error(f"Erreur lors du traitement du fichier : {e}")
-                    await message.channel.send(f"Erreur lors de l'analyse : {e}")
+                    await message.channel.send(f"Erreur : {e}")
 
 # Route pour UptimeRobot
 @app.route('/ping')
