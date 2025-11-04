@@ -22,12 +22,30 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 # Vérification des variables d'environnement
 if not all([DISCORD_TOKEN, MISTRAL_API_KEY, CHANNEL_ID]):
-    raise ValueError("Les variables d'environnement DISCORD_TOKEN, MISTRAL_API_KEY et CHANNEL_ID sont requises.")
+    logger.error("Variables d'environnement manquantes !")
+    raise ValueError("Variables d'environnement manquantes !")
 
 if not CHANNEL_ID.isdigit():
+    logger.error("CHANNEL_ID doit être un nombre entier valide.")
     raise ValueError("CHANNEL_ID doit être un nombre entier valide.")
 
 CHANNEL_ID = int(CHANNEL_ID)
+
+# Base de données des prestations et leurs prix
+PRESTATIONS = {
+    "DDR4": {
+        "Overclock CPU": 20,
+        "Overclock CPU + RAM": 65,
+        "Overclock RAM + GPU": 55,
+        "Overclock CPU + RAM + GPU": 85
+    },
+    "DDR5": {
+        "Overclock CPU": 40,
+        "Overclock CPU + RAM": 155,
+        "Overclock RAM + GPU": 135,
+        "Overclock CPU + RAM + GPU": 195
+    }
+}
 
 # Initialiser Flask pour UptimeRobot
 app = Flask(__name__)
@@ -75,14 +93,33 @@ def send_to_mistral(text):
                     "content": f"""
                     Analyse les résultats de diagnostic suivants pour déterminer les possibilités d'overclocking (CPU, RAM, GPU) :
                     {text}
-                    Retourne une réponse structurée sous la forme :
-                    'Sur ton PC, il est possible de faire un Overclock CPU, un Overclock RAM, ce qui correspond à la prestation OC CPU RAM à **€[prix]**.'
+
+                    **Instructions strictes :**
+                    1. Identifie le type de RAM (DDR4 ou DDR5) à partir des résultats de diagnostic.
+                    2. Détermine quels composants peuvent être overclockés (CPU, RAM, GPU).
+                    3. Choisis la prestation correspondante parmi les options suivantes en fonction du type de RAM et des composants overclockables :
+                        - DDR4 : Overclock CPU, Overclock CPU + RAM, Overclock RAM + GPU, Overclock CPU + RAM + GPU
+                        - DDR5 : Overclock CPU, Overclock CPU + RAM, Overclock RAM + GPU, Overclock CPU + RAM + GPU
+                    4. Retourne une réponse **uniquement** sous la forme suivante :
+                    ```
+                    Tu peux faire :
+                    - Un Overclock CPU
+                    - Un Overclock de la RAM
+                    - Un Overclock du GPU
+
+                    Ce qui correspond à la prestation : [Nom de la prestation] à **[prix]€**
+                    ```
+                    5. Remplace [Nom de la prestation] et [prix] par la prestation et le prix appropriés en fonction du type de RAM et des composants overclockables.
+                    6. Si un composant ne peut pas être overclocké, ne le mentionne pas.
+                    7. Respecte strictement le format de réponse.
+                    8. Pour les prestations DDR5, ajoute "(Paiement en plusieurs fois possible)" à la fin de la ligne de prix.
                     """
                 }
             ]
         }
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
+
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         logger.error(f"Erreur lors de l'appel à l'API Mistral : {e}")
@@ -126,10 +163,12 @@ def ping():
 
 # Lancer le bot Discord dans un thread séparé
 def run_bot():
+    logger.info("Démarrage du bot Discord...")
     bot.run(DISCORD_TOKEN)
 
 # Lancer le serveur Flask
 def run_flask():
+    logger.info("Démarrage du serveur Flask...")
     app.run(host='0.0.0.0', port=10000)
 
 if __name__ == "__main__":
