@@ -4,8 +4,6 @@ import os
 from dotenv import load_dotenv
 import requests
 from io import BytesIO
-import pdfplumber
-from bs4 import BeautifulSoup
 from flask import Flask
 import threading
 import logging
@@ -32,24 +30,6 @@ if not CHANNEL_ID.isdigit():
 
 CHANNEL_ID = int(CHANNEL_ID)
 
-# Base de données des prestations et leurs prix
-PRESTATIONS = {
-    "DDR4": {
-        "Overclock GPU": 30,
-        "Overclock CPU + RAM": 65,
-        "Overclock CPU + GPU": 75,
-        "Overclock RAM + GPU": 55,
-        "Overclock CPU + RAM + GPU": 85
-    },
-    "DDR5": {
-        "Overclock GPU": 30,
-        "Overclock CPU + RAM": 155,
-        "Overclock CPU + GPU": 175,
-        "Overclock RAM + GPU": 135,
-        "Overclock CPU + RAM + GPU": 195
-    }
-}
-
 # Initialiser Flask pour UptimeRobot
 app = Flask(__name__)
 
@@ -59,57 +39,8 @@ intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Fonction pour extraire les informations du HTML
-def extract_info_from_html(html_bytes):
-    soup = BeautifulSoup(html_bytes, "html.parser")
-    text = soup.get_text()
-
-    info = {
-        "RAM": None,
-        "carte_mere": None,
-        "CPU": None,
-        "GPU": None,
-        "is_laptop": False
-    }
-
-    # Vérifier si c'est un PC portable
-    if "Laptop" in text or "Notebook" in text or "Portable" in text:
-        info["is_laptop"] = True
-
-    # Extraire le type de RAM
-    if "DDR4" in text:
-        info["RAM"] = "DDR4"
-    elif "DDR5" in text:
-        info["RAM"] = "DDR5"
-
-    # Extraire la carte mère
-    carte_mere_keywords = ["A520M", "B450M", "B550", "X570", "Z590", "B560", "B660", "B760"]
-    for keyword in carte_mere_keywords:
-        if keyword in text:
-            info["carte_mere"] = keyword
-            break
-
-    # Extraire le CPU
-    if "AMD" in text or "Intel" in text:
-        cpu_start = text.find("AMD") if "AMD" in text else text.find("Intel")
-        if cpu_start != -1:
-            cpu_line = text[cpu_start:].split("\n")[0]
-            info["CPU"] = cpu_line.strip()
-
-    # Extraire le GPU
-    gpu_keywords = ["NVIDIA", "AMD", "RADEON", "GTX", "RTX"]
-    for keyword in gpu_keywords:
-        if keyword in text:
-            gpu_start = text.find(keyword)
-            if gpu_start != -1:
-                gpu_line = text[gpu_start:].split("\n")[0]
-                info["GPU"] = gpu_line.strip()
-                break
-
-    return info
-
-# Fonction pour envoyer les informations à Mistral
-def send_to_mistral(info):
+# Fonction pour envoyer le fichier HTML à Mistral
+def send_html_to_mistral(html_content):
     try:
         url = "https://api.mistral.ai/v1/chat/completions"
         headers = {
@@ -117,43 +48,45 @@ def send_to_mistral(info):
             "Content-Type": "application/json"
         }
 
-        # Vérifier si c'est un PC portable
-        if info["is_laptop"]:
-            return "Pas de prestation d'overclocking disponible pour les PC portables."
-
         data = {
             "model": "mistral-small",
             "messages": [
                 {
                     "role": "user",
                     "content": f"""
-                    Voici les informations d'un diagnostic PC :
-                    - RAM: {info["RAM"]}
-                    - Carte mère: {info["carte_mere"]}
-                    - CPU: {info["CPU"]}
-                    - GPU: {info["GPU"]}
+                    Voici le contenu complet d'un fichier de diagnostic PC au format HTML :
 
-                    **Règles strictes pour l'overclocking :**
+                    ```html
+                    {html_content}
+                    ```
 
-                    1. Overclock CPU AMD :
-                       - Possible uniquement si c'est un AMD Ryzen ET si la carte mère est de modèle B ou X.
+                    **Instructions pour l'analyse :**
 
-                    2. Overclock CPU Intel :
-                       - Possible uniquement si c'est un processeur modèle K, KF ou KS ET si la carte mère est de modèle Z.
+                    1. Analyse ce fichier HTML pour extraire les informations suivantes :
+                       - Type et fréquence de la RAM (vérifie chaque slot de RAM).
+                       - Modèle de la carte mère.
+                       - Modèle du CPU (AMD ou Intel, et si c'est un modèle K, KF, KS pour Intel).
+                       - Modèle du GPU (NVIDIA, AMD, Intel).
+                       - Si c'est un PC portable.
 
-                    3. Overclock de la RAM sur CPU Intel :
-                       - Possible uniquement si la carte mère est de modèle Z, B560, B660 ou B760.
+                    2. Applique les règles suivantes pour déterminer les possibilités d'overclocking :
 
-                    4. Overclock de la RAM sur CPU AMD :
-                       - Possible uniquement si c'est un AMD Ryzen ET si la carte mère est de modèle B ou X.
+                       **Overclock CPU :**
+                       - AMD Ryzen : Possible uniquement si la carte mère est de modèle B ou X.
+                       - Intel : Possible uniquement si le CPU est un modèle K, KF ou KS et si la carte mère est de modèle Z.
 
-                    5. Overclock du GPU :
-                       - Possible uniquement si c'est une carte graphique NVIDIA ou AMD.
-                       - Pas possible si c'est une carte graphique Intel (Intel UHD, Intel Iris).
+                       **Overclock RAM :**
+                       - AMD Ryzen : Possible uniquement si la carte mère est de modèle B ou X.
+                       - Intel : Possible uniquement si la carte mère est de modèle Z, B560, B660 ou B760.
+                       - Vérifie aussi que les slots RAM ne sont pas vides.
 
-                    **Instructions :**
-                    - Détermine quels composants peuvent être overclockés en fonction des règles ci-dessus.
-                    - Utilise les prix suivants pour les prestations :
+                       **Overclock GPU :**
+                       - Possible uniquement si le GPU est une carte NVIDIA ou AMD.
+                       - Pas possible si le GPU est une carte Intel (Intel UHD, Intel Iris).
+
+                       **Pas d'overclocking pour les PC portables.**
+
+                    3. Utilise les prix suivants pour les prestations :
                         - DDR4 :
                             - Overclock GPU : 30€
                             - Overclock CPU + RAM : 65€
@@ -167,16 +100,19 @@ def send_to_mistral(info):
                             - Overclock RAM + GPU : 135€
                             - Overclock CPU + RAM + GPU : 195€
 
-                    **Format de réponse strict :**
+                    4. Retourne une réponse sous la forme suivante :
+
                     ```
                     Tu peux faire :
                     [Liste des composants overclockables parmi CPU, RAM, GPU]
 
                     Ce qui correspond à la prestation : [Nom de la prestation] à **€[prix]**
                     ```
+
                     - Ne mentionne que les composants qui peuvent être overclockés.
                     - Respecte strictement le format de réponse.
                     - Pour les prestations DDR5, ajoute "(Paiement en plusieurs fois possible)" à la fin de la ligne de prix.
+                    - Si c'est un PC portable, réponds simplement : "Pas de prestation d'overclocking disponible pour les PC portables."
                     """
                 }
             ]
@@ -190,7 +126,7 @@ def send_to_mistral(info):
             retry_after = int(e.response.headers.get('Retry-After', 10))
             logger.error(f"Trop de requêtes. Attente de {retry_after} secondes...")
             time.sleep(retry_after)
-            return send_to_mistral(info)  # Réessayer après le délai
+            return send_html_to_mistral(html_content)  # Réessayer après le délai
         else:
             logger.error(f"Erreur HTTP lors de l'appel à l'API Mistral : {e}")
             return f"Erreur HTTP : {e}"
@@ -211,12 +147,9 @@ async def on_message(message):
                 await message.channel.send(f"Analyse de {attachment.filename} en cours...")
                 file_content = await attachment.read()
                 try:
-                    info = extract_info_from_html(file_content)
-                    if info["RAM"] and info["carte_mere"] and info["CPU"]:
-                        result = send_to_mistral(info)
-                        await message.channel.send(f"```{result}```")
-                    else:
-                        await message.channel.send("Impossible d'extraire les informations nécessaires du fichier.")
+                    html_content = file_content.decode('utf-8')
+                    result = send_html_to_mistral(html_content)
+                    await message.channel.send(f"```{result}```")
                 except Exception as e:
                     logger.error(f"Erreur lors du traitement du fichier : {e}")
                     await message.channel.send(f"Erreur : {e}")
